@@ -2,7 +2,12 @@
 
 一个 Jetpack Compose 组件：把一组封面排成斜着看的文库本书架。左右滑动翻书，选中的书会从书架里抽出来、转过来露出封面，点它就会回调 `onOpen`。
 
-![](preview.gif)
+![](images/preview.gif)
+
+<p>
+  <img src="images/dark.png" width="45%" alt="深色模式">
+  <img src="images/light.png" width="45%" alt="浅色模式">
+</p>
 
 ## 技术栈
 
