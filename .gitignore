@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+.kotlin/
+build/
+local.properties
+*.iml
+.DS_Store
+
+# 演示用封面放在这里，不提交（见 README）
+demo/src/main/assets/covers/
