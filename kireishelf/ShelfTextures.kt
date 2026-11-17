@@ -101,7 +101,9 @@ internal object ShelfTexturePainter {
 
     /** Fine paper grain on the paper parts only (obi), never on the printed art. */
     private fun paperGrain(c: Canvas, r: RectF) {
-        c.drawRect(r, Paint().apply { alpha = 24; shader = BitmapShader(grain, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) })
+        val p = Paint().apply { shader = BitmapShader(grain, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) }
+        p.alpha = 24
+        c.drawRect(r, p)
     }
 
     private val grain: Bitmap by lazy {
@@ -241,7 +243,10 @@ internal object ShelfPalette {
             val g = (p shr 8) and 0xFF
             val b = p and 0xFF
             val acc = sums.getOrPut(((r shr 4) shl 8) or ((g shr 4) shl 4) or (b shr 4)) { LongArray(4) }
-            acc[0] += r.toLong(); acc[1] += g.toLong(); acc[2] += b.toLong(); acc[3]++
+            acc[0] += r.toLong()
+            acc[1] += g.toLong()
+            acc[2] += b.toLong()
+            acc[3]++
         }
         val buckets = sums.values.map { Bucket(rgbToHsl((it[0] / it[3]).toInt(), (it[1] / it[3]).toInt(), (it[2] / it[3]).toInt()), it[3].toInt()) }
             .filter { it.hsl[2] in .06f..0.95f }

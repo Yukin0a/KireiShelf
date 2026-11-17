@@ -145,7 +145,7 @@ fun KireiShelf(
         // When a texture first arrived, for a short fade-in instead of a pop.
         val readyAt = remember(dark) { HashMap<Long, Long>() }
         // Loaders reach a few books beyond what is drawn, so a fling lands on finished books.
-        val center by remember { derivedStateOf { scroll.target } }
+        val center = scroll.target
         val from = (center - TEXTURE_RADIUS - PREFETCH_EXTRA).coerceAtLeast(0)
         val to = (center + TEXTURE_RADIUS + PREFETCH_EXTRA).coerceAtMost(books.lastIndex)
         for (i in from..to) {
@@ -155,7 +155,7 @@ fun KireiShelf(
                     if (fresh) readyAt[book.id] = System.nanoTime()
                     textures[book.id] = tex
                 }
-                DisposableEffect(book.id) { onDispose { textures.remove(book.id) } }
+                DisposableEffect(book.id, textures) { onDispose { textures.remove(book.id) } }
             }
         }
         val lastFrame = remember { ArrayList<Pair<Int, ShelfBookQuads>>() }
@@ -301,9 +301,12 @@ fun KireiShelf(
                     val texAlpha = (fade * 255).roundToInt()
                     val dim = dimK * (1f - p.near)
                     val ao = 1f - p.turn
-                    q.back?.let { fillQuad(nc, it, ink.back); lightFace(nc, it, dim, ao, soft) }
+                    q.back?.let {
+                        fillQuad(nc, it, ink.back)
+                        lightFace(nc, it, dim, ao, soft)
+                    }
                     q.top?.let {
-                        if (material?.face(nc, pages, it, ShelfBookMaterial.ALL, ShelfBookMaterial.NONE, ShelfModel.BOOK_W / pages.width, dim, 0f, 255) != true) {
+                        if (material?.face(nc, pages, it, ShelfBookMaterial.ALL, ShelfModel.BOOK_W / pages.width, dim, 0f, 255) != true) {
                             bitmapPaint.alpha = 255
                             mapBitmap(nc, pages, it, bitmapPaint)
                             lightFace(nc, it, dim, 0f, soft)
@@ -314,14 +317,14 @@ fun KireiShelf(
                     q.spine?.let {
                         if (tex == null || texAlpha < 255) fillQuad(nc, it, ink.placeholder)
                         // The spine is printed jacket (laminate) down to the obi: no paper label.
-                        if (tex == null || material?.face(nc, tex.spine, it, obi, ShelfBookMaterial.NONE, ShelfModel.BOOK_H / tex.spine.height, dim * 1.3f, ao, texAlpha) != true) {
+                        if (tex == null || material?.face(nc, tex.spine, it, obi, ShelfModel.BOOK_H / tex.spine.height, dim * 1.3f, ao, texAlpha) != true) {
                             if (tex != null) mapBitmap(nc, tex.spine, it, bitmapPaint)
                             lightFace(nc, it, dim * 1.3f, ao, soft)
                         }
                     }
                     q.cover?.let {
                         if (tex == null || texAlpha < 255) fillQuad(nc, it, ink.placeholder)
-                        if (tex == null || material?.face(nc, tex.cover, it, obi, ShelfBookMaterial.NONE, ShelfModel.BOOK_H / tex.cover.height, dim, ao, texAlpha) != true) {
+                        if (tex == null || material?.face(nc, tex.cover, it, obi, ShelfModel.BOOK_H / tex.cover.height, dim, ao, texAlpha) != true) {
                             if (tex != null) mapBitmap(nc, tex.cover, it, bitmapPaint)
                             lightFace(nc, it, dim, ao, soft)
                             sheen(nc, it, 1f - ShelfModel.OBI_FRACTION, dark)

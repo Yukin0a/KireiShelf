@@ -14,7 +14,6 @@ import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
 import androidx.annotation.RequiresApi
-import java.util.WeakHashMap
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
@@ -97,6 +96,8 @@ internal data class ShelfPose(
 )
 
 internal object ShelfMotion {
+    private val TAN_Y = tan(Math.toRadians(ShelfModel.RIG_ROT_Y.toDouble())).toFloat()
+
     /** How far a book tips into the gap its pulled-out neighbour leaves. */
     const val LEAN_DEG = 2.2f
 
@@ -144,10 +145,9 @@ internal object ShelfMotion {
         val p2 = smoother(a * 1.8f - .8f)
         val out = ShelfModel.BOOK_D + ShelfModel.PULL
         val z = p1 * out
-        val tanY = tan(Math.toRadians(ShelfModel.RIG_ROT_Y.toDouble())).toFloat()
         // The sideways glide that brings the book back to the centre of the view happens only in
         // phase 2, when the book is in front of the row.
-        val x = index * ShelfModel.GAP + d.coerceIn(-1f, 1f) * ShelfModel.PART - tanY * out * p2
+        val x = index * ShelfModel.GAP + d.coerceIn(-1f, 1f) * ShelfModel.PART - TAN_Y * out * p2
         val bob = if (reducedMotion) 0f else p2 * sin(timeSec * 1.3f) * 1.8f
         val sway = if (reducedMotion) 0f else p2 * sin(timeSec * .9f + .7f) * 1.5f
         // Standing books: a hair out of line in depth and angle. Fades as the book is picked.
@@ -388,11 +388,15 @@ internal class ShelfCamera(
     val originY = designH * frame.originY
     val rigX = designW * frame.centerX
     val rigY = designH * frame.rigTop
-    private val cx = cos(Math.toRadians(ShelfModel.RIG_ROT_X.toDouble())).toFloat()
-    private val sx = sin(Math.toRadians(ShelfModel.RIG_ROT_X.toDouble())).toFloat()
-    private val cy = cos(Math.toRadians(ShelfModel.RIG_ROT_Y.toDouble())).toFloat()
-    private val sy = sin(Math.toRadians(ShelfModel.RIG_ROT_Y.toDouble())).toFloat()
     private val tmp = FloatArray(3)
+
+    /** The rig's fixed angles. */
+    private companion object {
+        val cx = cos(Math.toRadians(ShelfModel.RIG_ROT_X.toDouble())).toFloat()
+        val sx = sin(Math.toRadians(ShelfModel.RIG_ROT_X.toDouble())).toFloat()
+        val cy = cos(Math.toRadians(ShelfModel.RIG_ROT_Y.toDouble())).toFloat()
+        val sy = sin(Math.toRadians(ShelfModel.RIG_ROT_Y.toDouble())).toFloat()
+    }
 
     /** Track space → world space (rig applied), written into [out]. */
     private fun rig(x: Float, y: Float, z: Float, out: FloatArray) {
@@ -454,9 +458,9 @@ internal class ShelfCamera(
         for (i in 0 until 4) {
             rig(corners[i * 3], corners[i * 3 + 1], corners[i * 3 + 2], tmp)
             when (i) {
-                0 -> { world[0] = tmp[0]; world[1] = tmp[1]; world[2] = tmp[2] }
-                1 -> { world[3] = tmp[0]; world[4] = tmp[1]; world[5] = tmp[2] }
-                3 -> { world[6] = tmp[0]; world[7] = tmp[1]; world[8] = tmp[2] }
+                0 -> tmp.copyInto(world, 0)
+                1 -> tmp.copyInto(world, 3)
+                3 -> tmp.copyInto(world, 6)
             }
             depth += project(tmp, pts, i * 2)
         }
@@ -716,10 +720,16 @@ internal fun pagesBitmap(): Bitmap {
     return bmp
 }
 
+private val mapSrc = FloatArray(8)
+
 internal fun mapBitmap(c: NativeCanvas, bmp: Bitmap, q: ShelfQuad, paint: Paint) {
     val w = bmp.width.toFloat()
     val h = bmp.height.toFloat()
-    val ok = quadMatrix.setPolyToPoly(floatArrayOf(0f, 0f, w, 0f, w, h, 0f, h), 0, q.pts, 0, 4)
+    mapSrc[2] = w
+    mapSrc[4] = w
+    mapSrc[5] = h
+    mapSrc[7] = h
+    val ok = quadMatrix.setPolyToPoly(mapSrc, 0, q.pts, 0, 4)
     if (!ok) return
     c.drawBitmap(bmp, quadMatrix, paint)
 }
@@ -728,7 +738,11 @@ internal fun mapBitmap(c: NativeCanvas, bmp: Bitmap, q: ShelfQuad, paint: Paint)
 private val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 private val glassFill = Paint(Paint.ANTI_ALIAS_FLAG)
 
-private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+private val rimPaint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
 private val glassStops = floatArrayOf(.18f, .3f, .38f, .46f, .6f)
 private val boardBounds = android.graphics.RectF()
 private val fadePaint = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
@@ -752,8 +766,15 @@ private fun screenPathOf(q: ShelfQuad, w: Float, h: Float): Path {
             val by = poly[((i + 1) % n) * 2 + 1]
             val ai = inside(ax, ay)
             val bi = inside(bx, by)
-            if (ai) { out += ax; out += ay }
-            if (ai != bi) cross(ax, ay, bx, by).let { out += it.first; out += it.second }
+            if (ai) {
+                out.add(ax)
+                out.add(ay)
+            }
+            if (ai != bi) {
+                val (cx, cy) = cross(ax, ay, bx, by)
+                out.add(cx)
+                out.add(cy)
+            }
         }
         poly = out
     }
@@ -906,7 +927,15 @@ internal class ShelfBookMaterial private constructor(private val dark: Boolean) 
     private val shader = RuntimeShader(AGSL)
     private val laminate = tile(ShelfSurfaces.laminate())
     private val paper = tile(ShelfSurfaces.paper())
-    private val images = WeakHashMap<Bitmap, BitmapShader>()
+    /**
+     * Shaders of the textures drawn lately. A BitmapShader holds its Bitmap, so a weak-keyed map
+     * would never let go of them; this keeps only the most recent ones (a frame draws at most
+     * two textures for each of 2 × DRAW_RADIUS + 1 books, plus the page block).
+     */
+    private val images =
+        object : LinkedHashMap<Bitmap, BitmapShader>(32, .75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Bitmap, BitmapShader>) = size > 4 * ShelfModel.DRAW_RADIUS + 4
+        }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val matrix = Matrix()
     private val path = Path()
@@ -948,8 +977,8 @@ internal class ShelfBookMaterial private constructor(private val dark: Boolean) 
     }
 
     /**
-     * Draws [bmp] on [q] with the material. [paperA] / [paperB] are uv rects (u0, v0, u1, v1)
-     * that are matte paper; the rest is laminate. [unitsPerPx] converts texture px to design
+     * Draws [bmp] on [q] with the material. [paper] is the uv rect (u0, v0, u1, v1) that is
+     * matte paper; the rest is laminate. [unitsPerPx] converts texture px to design
      * units (for the relief tile size); [dim] darkens books away from the selection, [ao]
      * darkens the foot where the book meets the shelf. Returns false when it could not draw.
      */
@@ -957,8 +986,7 @@ internal class ShelfBookMaterial private constructor(private val dark: Boolean) 
         c: NativeCanvas,
         bmp: Bitmap,
         q: ShelfQuad,
-        paperA: FloatArray,
-        paperB: FloatArray,
+        paper: FloatArray,
         unitsPerPx: Float,
         dim: Float,
         ao: Float,
@@ -967,7 +995,10 @@ internal class ShelfBookMaterial private constructor(private val dark: Boolean) 
         val w = q.world ?: return false
         val bw = bmp.width.toFloat()
         val bh = bmp.height.toFloat()
-        src[0] = 0f; src[1] = 0f; src[2] = bw; src[3] = 0f; src[4] = bw; src[5] = bh; src[6] = 0f; src[7] = bh
+        src[2] = bw
+        src[4] = bw
+        src[5] = bh
+        src[7] = bh
         if (!matrix.setPolyToPoly(src, 0, q.pts, 0, 4)) return false
         val image = images.getOrPut(bmp) { BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { filterMode = BitmapShader.FILTER_MODE_LINEAR } }
         shader.setInputShader("image", image)
@@ -976,8 +1007,7 @@ internal class ShelfBookMaterial private constructor(private val dark: Boolean) 
         shader.setFloatUniform("du", w[3], w[4], w[5])
         shader.setFloatUniform("dv", w[6], w[7], w[8])
         shader.setFloatUniform("nrm", w[9], w[10], w[11])
-        shader.setFloatUniform("paperA", paperA[0], paperA[1], paperA[2], paperA[3])
-        shader.setFloatUniform("paperB", paperB[0], paperB[1], paperB[2], paperB[3])
+        shader.setFloatUniform("paperRect", paper[0], paper[1], paper[2], paper[3])
         // Relief tiles: the laminate's long waves repeat every 150 design units, the paper every 56.
         shader.setFloatUniform("tileLam", ShelfSurfaces.SIZE / (150f / unitsPerPx))
         shader.setFloatUniform("tilePaper", ShelfSurfaces.SIZE / (56f / unitsPerPx))
@@ -999,9 +1029,8 @@ internal class ShelfBookMaterial private constructor(private val dark: Boolean) 
     }
 
     companion object {
-        /** Whole face is paper / no paper. */
+        /** The whole face is paper. */
         val ALL = floatArrayOf(0f, 0f, 1f, 1f)
-        val NONE = floatArrayOf(2f, 2f, 2f, 2f)
 
         fun create(dark: Boolean): ShelfBookMaterial = ShelfBookMaterial(dark)
 
@@ -1035,8 +1064,7 @@ uniform float3 amb;
 uniform float3 keyRad;
 uniform float3 kickRad;
 uniform float3 envRad;
-uniform float4 paperA;
-uniform float4 paperB;
+uniform float4 paperRect;
 uniform float tileLam;
 uniform float tilePaper;
 uniform float dim;
@@ -1049,7 +1077,7 @@ bool inside(float2 uv, float4 r) {
 half4 main(float2 p) {
     float2 uv = p / size;
     half4 base = image.eval(p);
-    bool onPaper = inside(uv, paperA) || inside(uv, paperB);
+    bool onPaper = inside(uv, paperRect);
     float3 m;
     float tone = 1.0;
     if (onPaper) {

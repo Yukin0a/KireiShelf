@@ -41,7 +41,6 @@ internal class ShelfInk(dark: Boolean, swatches: ShelfSwatches) {
 
 /** 一本书要印的内容，由 [ShelfBook] 和整个书架算出来。 */
 internal data class ShelfBookInfo(
-    val id: Long,
     val title: String,
     /** 腰封上的大数字和单位，例如 12 + 小时。 */
     val playNumber: String,
@@ -59,20 +58,22 @@ internal data class ShelfBookInfo(
 
 internal fun bookInfos(books: List<ShelfBook>, nowMs: Long): List<ShelfBookInfo> {
     val longest = books.maxOfOrNull { it.playTime } ?: 0L
-    val sorted = books.map { it.playTime }.sortedDescending()
+    // Rank by play time; equal times share the better rank.
+    val rankOf = HashMap<Long, Int>()
+    books.map { it.playTime }.sortedDescending().forEachIndexed { i, t -> rankOf.putIfAbsent(t, i + 1) }
+    val longestLabel = duration(longest).let { "${it.first} ${it.second}" }
     return books.mapIndexed { i, b ->
         val (number, unit) = duration(b.playTime)
         ShelfBookInfo(
-            id = b.id,
             title = b.title.ifBlank { ShelfWords.UNTITLED },
             playNumber = number,
             playUnit = unit,
             lastPlayed = lastPlayedLabel(b.lastPlayedAt, nowMs),
             index = i + 1,
-            rank = sorted.indexOf(b.playTime) + 1,
+            rank = rankOf.getValue(b.playTime),
             total = books.size,
             share = if (longest > 0L) b.playTime.toFloat() / longest else 0f,
-            longestLabel = duration(longest).let { "${it.first} ${it.second}" },
+            longestLabel = longestLabel,
         )
     }
 }
